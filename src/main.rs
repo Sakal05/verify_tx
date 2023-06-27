@@ -1,5 +1,9 @@
 use web3_rpc::web3::Web3;
-use std::{ thread, time, arch::x86_64::_CMP_FALSE_OQ };
+use serde::Deserialize;
+use num_bigint::BigUint;
+use num_traits::FromPrimitive;
+use web3_unit_converter::Unit;
+
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -85,31 +89,24 @@ async fn main() -> anyhow::Result<()> {
     // } else {
     //     println!("Failed, confirmed block must greater than 2");
     // }
-    
-    let res = query_rpc("POLYGON".to_owned());
-    let mut rpc_url: String = "".to_owned();
-    match res {
-        Ok(res) => {
-            println!("Successfully confirmed: {}", res);
-            rpc_url = res;
-        }
-        Err(e) => println!("Error finding network: {}", e),
-    }
+
     let v_ad = validate_address(
-        rpc_url.as_str(),
+        "AVALANCHE".to_owned(),
+        "0xCF6F0d155989B11Ba3882e99c72f609f0C06e086",
         "0x5852231D8a00306A67DfB128AEd50c1573411d60"
     ).await?;
+
     match v_ad {
-        true => println!("YES"),
-        false => println!("NO"),
+        true => println!("Address Valid"),
+        false => println!("Address Not Valid"),
     }
     Ok(())
 }
 
 fn query_rpc(network_name: String) -> anyhow::Result<String> {
     let rpc_url: Option<String> = match network_name.to_lowercase().as_str() {
-        "polygon" => Some(format!("https://api-testnet.{}/", "polygonscan.com")),
-        "avalanche" => Some(format!("https://api-testnet.{}/", "snowtrace.io")),
+        "polygon" => Some(format!("https://api-testnet.{}/api?", "polygonscan.com")),
+        "avalanche" => Some(format!("https://api-testnet.{}/api?", "snowtrace.io")),
         _ => None,
     };
     //https://api-testnet.snowtrace.io/
@@ -120,15 +117,68 @@ fn query_rpc(network_name: String) -> anyhow::Result<String> {
     }
 }
 
-async fn validate_address(rpc_url: &str, address: &str) -> anyhow::Result<bool> {
-    let rpc = Web3::new(rpc_url.to_string());
-    let r = rpc.eth_get_balance(&address, None).await?;
-    println!("M here");
-    match r.result {
-        Some(result) => {
-            println!("result of account: {}", result);
-            Ok(true)
-        }
-        None => Err(anyhow::anyhow!("Account not found")),
+async fn validate_address(network: String, to_address: &str, from_address: &str) -> anyhow::Result<bool> {
+    #[derive(Debug)]
+    #[derive(Deserialize)]
+    struct ApiResponse {
+        status: String,
+        message: String,
+        result: Vec<Account>,
     }
+
+    #[derive(Deserialize)]
+    #[derive(Debug)]
+    struct ApiError {
+        code: i32,
+        message: String,
+    }
+
+    #[derive(Deserialize)]
+    #[derive(Debug)]
+    struct Account {
+        account: String,
+        balance: String,
+    }
+
+    //get url
+    let rpc_url = match query_rpc(network) {
+        Ok(res) => {
+            // println!("Successfully obtained RPC URL: {}", res);
+            res
+        }
+        Err(e) => {
+            println!("Error finding network: {}", e);
+            return Err(anyhow::anyhow!("Network not found"));
+        }
+    };
+
+    // let rpc = Web3::new(rpc_url.to_string());
+    let url = format!(
+        "{}module=account&action=balancemulti&address={},{}&tag=latest&apikey=U5U1Q3YXX6BMNJ5DJVDK4EBYRUVZS3HBZI",
+        rpc_url,
+        to_address,
+        from_address
+    );
+
+    let res = reqwest::get(&url).await?.json::<ApiResponse>().await?;
+    println!("{:#?}", res);
+    if (&res.result[0].balance == "0" || &res.result[1].balance == "0") {
+        Ok(false)
+    } else {
+        let r1 = Unit::Wei(res.result[0].balance.as_str()).to_eth_str().unwrap();
+        println!("Value is to_address: {}", r1);
+        let r2 = Unit::Wei(res.result[1].balance.as_str()).to_eth_str().unwrap();
+        println!("Value is to_address: {}", r2);
+        Ok(true)
+    }
+
+    // println!("Response: {:#?}", &res.id);
+    // let r = rpc.eth_get_balance(address, None).await?;
+    // match res {
+    //     result => {
+    //         println!("Response: {}", &result.result);
+    //     }
+    // }
+
+    // Ok(true)
 }
